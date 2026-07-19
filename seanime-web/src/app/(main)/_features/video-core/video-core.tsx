@@ -41,6 +41,7 @@ import { vc_containerElement } from "@/app/(main)/_features/video-core/video-cor
 import { vc_previousPausedState } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_lastKnownProgress } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_skipChapter } from "@/app/(main)/_features/video-core/video-core-atoms"
+import { vc_selectedAudioEffect } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { VideoCoreAudioManager } from "@/app/(main)/_features/video-core/video-core-audio"
 import { VideoCoreAudioMenu } from "@/app/(main)/_features/video-core/video-core-audio-menu"
 import { CastPlaybackControls, useCastSubtitleRelay, vc_isCasting, VideoCoreCastButton } from "@/app/(main)/_features/video-core/video-core-cast"
@@ -142,6 +143,9 @@ import { RemoveScrollBar } from "react-remove-scroll-bar"
 import { useUnmount, useUpdateEffect, useWindowSize } from "react-use"
 import { VideoCoreScreenshotDirPrompt } from "./video-core-screenshot-prompt"
 
+import { vc_selectedAudioEffect } from "@/app/(main)/_features/video-core/video-core-atoms"
+import { AUDIO_EFFECTS_REGISTRY } from "@/app/(main)/_features/video-core/video-core-audio-effects"
+
 const log = logger("VIDEO CORE")
 
 export const VIDEOCORE_DEBUG_ELEMENTS = false
@@ -193,6 +197,54 @@ export const vc_mediaCaptionsManager = atom<MediaCaptionsManager | null>(null)
 export const vc_audioManager = atom<VideoCoreAudioManager | null>(null)
 export const vc_previewManager = atom<VideoCorePreviewManager | null>(null)
 export const vc_anime4kManager = atom<VideoCoreAnime4KManager | null>(null)
+
+// Variables persistantes au niveau du module pour éviter les doubles connexions Web Audio
+let globalAudioCtx: AudioContext | null = null
+let globalSourceNode: MediaElementAudioSourceNode | null = null
+let globalCurrentEffectNode: AudioNode | null = null
+
+// Fonction autonome et pure qui manipule l'API Web Audio persistante liée au DOM de la vidéo
+function applyAudioEffectToElement(video: HTMLVideoElement | null, effectId: string) {
+    if (!video) return
+
+    try {
+        // Initialisation unique attachée au cycle de vie de l'élément vidéo DOM
+        if (!(video as any).__audioCtx) {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            (video as any).__audioCtx = new AudioContextClass();
+            (video as any).__sourceNode = (video as any).__audioCtx.createMediaElementSource(video);
+        }
+
+        const ctx = (video as any).__audioCtx as AudioContext
+        const source = (video as any).__sourceNode as MediaElementAudioSourceNode
+
+        if (ctx.state === "suspended") {
+            ctx.resume()
+        }
+
+        // Nettoyer l'ancien nœud d'effet
+        if ((video as any).__currentEffectNode) {
+            try {
+                (video as any).__currentEffectNode.disconnect()
+            } catch (e) {}
+        }
+        source.disconnect()
+
+        // Récupérer l'effet depuis ton registre
+        const effect = AUDIO_EFFECTS_REGISTRY[effectId] || AUDIO_EFFECTS_REGISTRY["none"]
+        const lastNode = effect.apply(ctx, source)
+        
+        // Branchement final
+        lastNode.connect(ctx.destination)
+        
+        // Sauvegarde pour le prochain changement
+        (video as any).__currentEffectNode = lastNode === source ? null : lastNode
+        
+        console.log(`[AudioEffect] Effet "${effectId}" appliqué avec succès sur l'élément vidéo !`)
+    } catch (e) {
+        console.error("[AudioEffect] Échec de l'application :", e)
+    }
+}
 
 export function VideoCoreProvider(props: { id: string, children: React.ReactNode }) {
     const { children } = props
@@ -266,6 +318,7 @@ export function VideoCoreProvider(props: { id: string, children: React.ReactNode
                 vc_isSwiping,
                 vc_isMobile,
                 vc_swipeSeekTime,
+                vc_selectedAudioEffect,
             ]}
         >
             {children}
@@ -698,6 +751,14 @@ export function VideoCore(props: VideoCoreProps) {
     const setRealVideoSize = useSetAtom(vc_realVideoSize)
     useVideoCoreBindings(videoElement, state.playbackInfo)
     useVideoCorePlaylistSetup(state, onPlayEpisode)
+
+    const selectedAudioEffect = useAtomValue(vc_selectedAudioEffect)
+
+    React.useEffect(() => {
+        if (!videoElement) return
+        applyAudioEffectToElement(videoElement, selectedAudioEffect)
+    }, [videoElement, selectedAudioEffect])
+
 
     const { isParticipant: isWatchPartyParticipant } = useNakamaWatchParty()
 

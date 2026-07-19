@@ -2,6 +2,8 @@
 import { atom } from "jotai"
 import { derive } from "jotai-derive"
 
+import { atomWithStorage } from "jotai/utils"
+
 export const vc_menuOpen = atom<string | null>(null)
 export const vc_menuSectionOpen = atom<string | null>(null)
 export const vc_menuSubSectionOpen = atom<string | null>(null)
@@ -61,3 +63,4 @@ export const vc_skipChapter = atom<{
 } | null>(null)
 
 export const vc_globalMiniPlayerAtom = atom(false)
+export const vc_selectedAudioEffect = atomWithStorage<string>("seanime-audio-effect", "none")
