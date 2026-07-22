@@ -10,6 +10,7 @@ import { type NormalizedSkipData } from "@/app/(main)/_features/video-core/_lib/
 import { vc_anime4kOption, VideoCoreAnime4K } from "@/app/(main)/_features/video-core/video-core-anime-4k"
 import { Anime4KOption, VideoCoreAnime4KManager } from "@/app/(main)/_features/video-core/video-core-anime-4k-manager"
 import { vc_menuOpen } from "@/app/(main)/_features/video-core/video-core-atoms"
+import { vc_eqGains } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_menuSectionOpen } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_hoveringControlBar } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_activePlayerId } from "@/app/(main)/_features/video-core/video-core-atoms"
@@ -144,7 +145,8 @@ import { useUnmount, useUpdateEffect, useWindowSize } from "react-use"
 import { VideoCoreScreenshotDirPrompt } from "./video-core-screenshot-prompt"
 
 import { vc_selectedAudioEffect } from "@/app/(main)/_features/video-core/video-core-atoms"
-import { AUDIO_EFFECTS_REGISTRY } from "@/app/(main)/_features/video-core/video-core-audio-effects"
+import { vc_analyserNode } from "@/app/(main)/_features/video-core/video-core-atoms"
+import { AUDIO_EFFECTS_REGISTRY, VideoCoreAudioEffectsModal } from "@/app/(main)/_features/video-core/video-core-audio-effects"
 
 const log = logger("VIDEO CORE")
 
@@ -197,54 +199,6 @@ export const vc_mediaCaptionsManager = atom<MediaCaptionsManager | null>(null)
 export const vc_audioManager = atom<VideoCoreAudioManager | null>(null)
 export const vc_previewManager = atom<VideoCorePreviewManager | null>(null)
 export const vc_anime4kManager = atom<VideoCoreAnime4KManager | null>(null)
-
-// Variables persistantes au niveau du module pour éviter les doubles connexions Web Audio
-let globalAudioCtx: AudioContext | null = null
-let globalSourceNode: MediaElementAudioSourceNode | null = null
-let globalCurrentEffectNode: AudioNode | null = null
-
-// Fonction autonome et pure qui manipule l'API Web Audio persistante liée au DOM de la vidéo
-function applyAudioEffectToElement(video: HTMLVideoElement | null, effectId: string) {
-    if (!video) return
-
-    try {
-        // Initialisation unique attachée au cycle de vie de l'élément vidéo DOM
-        if (!(video as any).__audioCtx) {
-            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            (video as any).__audioCtx = new AudioContextClass();
-            (video as any).__sourceNode = (video as any).__audioCtx.createMediaElementSource(video);
-        }
-
-        const ctx = (video as any).__audioCtx as AudioContext
-        const source = (video as any).__sourceNode as MediaElementAudioSourceNode
-
-        if (ctx.state === "suspended") {
-            ctx.resume()
-        }
-
-        // Nettoyer l'ancien nœud d'effet
-        if ((video as any).__currentEffectNode) {
-            try {
-                (video as any).__currentEffectNode.disconnect()
-            } catch (e) {}
-        }
-        source.disconnect()
-
-        // Récupérer l'effet depuis ton registre
-        const effect = AUDIO_EFFECTS_REGISTRY[effectId] || AUDIO_EFFECTS_REGISTRY["none"]
-        const lastNode = effect.apply(ctx, source)
-        
-        // Branchement final
-        lastNode.connect(ctx.destination)
-        
-        // Sauvegarde pour le prochain changement
-        (video as any).__currentEffectNode = lastNode === source ? null : lastNode
-        
-        console.log(`[AudioEffect] Effet "${effectId}" appliqué avec succès sur l'élément vidéo !`)
-    } catch (e) {
-        console.error("[AudioEffect] Échec de l'application :", e)
-    }
-}
 
 export function VideoCoreProvider(props: { id: string, children: React.ReactNode }) {
     const { children } = props
@@ -752,14 +706,6 @@ export function VideoCore(props: VideoCoreProps) {
     useVideoCoreBindings(videoElement, state.playbackInfo)
     useVideoCorePlaylistSetup(state, onPlayEpisode)
 
-    const selectedAudioEffect = useAtomValue(vc_selectedAudioEffect)
-
-    React.useEffect(() => {
-        if (!videoElement) return
-        applyAudioEffectToElement(videoElement, selectedAudioEffect)
-    }, [videoElement, selectedAudioEffect])
-
-
     const { isParticipant: isWatchPartyParticipant } = useNakamaWatchParty()
 
     const videoCompletedRef = useRef(false)
@@ -781,6 +727,90 @@ export function VideoCore(props: VideoCoreProps) {
     const action = useSetAtom(vc_dispatchAction)
     const setInSightOpen = useSetAtom(vc_inSight_open)
     const setInSightData = useSetAtom(vc_inSight_data)
+
+    // Get the Jotai setter for analyserNode parameters
+    const setAnalyserNode = useSetAtom(vc_analyserNode)
+    const audioCtxRef = useRef<AudioContext | null>(null)
+    const eqGains = useAtomValue(vc_eqGains)
+    const eqFiltersRef = useRef<BiquadFilterNode[]>([])
+
+    // Initialize Audio Analyzer
+    React.useEffect(() => {
+        const v = videoRef.current
+        if (!v || !state.active) return
+
+        const handleAudioInit = () => {
+            // Prevent double creation of AudioContext
+            if (!audioCtxRef.current) {
+                try {
+                    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext
+                    const audioCtx = new AudioCtxClass()
+                    audioCtxRef.current = audioCtx
+
+                    // Connection Web Audio API
+                    const source = audioCtx.createMediaElementSource(v)
+                    const analyser = audioCtx.createAnalyser()
+                    analyser.fftSize = 64 // 32 frequency bands for the spectrum
+
+                    // 5-BAND Equalizer
+                    const freqs = [60, 230, 910, 3600, 14000]
+                    const types: BiquadFilterType[] = ["lowshelf", "peaking", "peaking", "peaking", "highshelf"]
+
+                    const filters = freqs.map((freq, i) => {
+                        const filter = audioCtx.createBiquadFilter()
+                        filter.type = types[i]
+                        filter.frequency.value = freq
+                        filter.gain.value = eqGains[i] || 0
+                        return filter
+                    })
+
+                    eqFiltersRef.current = filters
+
+                    // Connections Source -> Filter 1 -> ... -> Filter 5 -> Analyser -> Output
+                    let currentNode: AudioNode = source
+                    filters.forEach((filter) => {
+                        currentNode.connect(filter)
+                        currentNode = filter
+                    })
+
+                    currentNode.connect(analyser)
+                    analyser.connect(audioCtx.destination)
+
+                    // Publish analyser in Jotai atom
+                    setAnalyserNode(analyser)
+                } catch (err) {
+                    log.error("Failed to initialize Web Audio AnalyserNode", err)
+                }
+            }
+
+            if (audioCtxRef.current?.state === "suspended") {
+                audioCtxRef.current.resume()
+            }
+        }
+
+        // Listens to the future clicks on Play
+        v.addEventListener("play", handleAudioInit)
+
+        // Correction AUTOPLAY
+        if (!v.paused) {
+            handleAudioInit()
+        }
+
+        return () => {
+            v.removeEventListener("play", handleAudioInit)
+        }
+    }, [videoRef.current, state.active, setAnalyserNode])
+
+    // Real-time configuration of the equalizer
+    React.useEffect(() => {
+        if (eqFiltersRef.current.length === 5) {
+            eqGains.forEach((gain, index) => {
+                if (eqFiltersRef.current[index]) {
+                    eqFiltersRef.current[index].gain.value = gain
+                }
+            })
+        }
+    }, [eqGains])
 
     // States
     const qc = useQueryClient()
@@ -1744,6 +1774,7 @@ export function VideoCore(props: VideoCoreProps) {
             <ScopeProvider atoms={[__torrentSearch_selectionAtom, __torrentSearch_selectionEpisodeAtom, __torrentSearch_selectedTorrentsAtom]}>
                 <VideoCoreAnime4K />
                 <VideoCorePreferencesModal isWebPlayer={props.id !== "native-player"} />
+                <VideoCoreAudioEffectsModal isWebPlayer={props.id !== "natuve-player"} />
                 <VideoCoreScreenshotDirPrompt />
                 {fullscreen && <RemoveScrollBar />}
                 <div

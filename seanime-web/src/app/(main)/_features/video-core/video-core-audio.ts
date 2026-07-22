@@ -4,6 +4,8 @@ import { logger } from "@/lib/helpers/debug"
 import { isTrackLanguageMatch } from "@/lib/helpers/language"
 import { AUDIO_EFFECTS_REGISTRY } from "./video-core-audio-effects"
 
+    
+
 const audioLog = logger("AUDIO")
 
 export type AudioManagerTrackChangedEvent = CustomEvent<{ trackNumber: number }>
@@ -307,11 +309,27 @@ export class VideoCoreAudioManager extends EventTarget {
         return this.hlsSetAudioTrack !== null && this.hlsAudioTracks.length > 0
     }
 
-    public initAudioEffects(videoElement: HTMLVideoElement) {
-        if (this.audioCtx) return;
+    // public initAudioEffects(videoElement: HTMLVideoElement) {
+    //     if (this.audioCtx) return;
 
-        this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        this.sourceNode = this.audioCtx.createMediaElementSource(videoElement),
-        this.sourceNode.connect(this.audioCtx.destination);
+    //     this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    //     this.sourceNode = this.audioCtx.createMediaElementSource(videoElement),
+    //     this.sourceNode.connect(this.audioCtx.destination);
+    // }
+
+    setupWebAudio(videoElement: HTMLMediaElement, setAnalyser: (node: AnalyserNode) => void) {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const source = audioCtx.createMediaElementSource(videoElement)
+        
+        // Création du nœud d'analyse
+        const analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 64 // 32 bandes de fréquences
+        
+        // Chaînage : Source -> Analyser -> Destinations (Haut-parleurs)
+        source.connect(analyser)
+        analyser.connect(audioCtx.destination)
+
+        // On stocke l'analyser dans l'atom Jotai
+        setAnalyser(analyser)
     }
 }
