@@ -13,6 +13,21 @@ import {
   vc_eqGains
 } from "./video-core-atoms"
 
+import {
+  AUDIO_EFFECTS_REGISTRY,
+  EQ_BANDS,
+  newBand,
+  C_MAX_GAIN,
+  C_MIN_GAIN,
+  defaultGains
+} from "./_lib/audio-effects"
+
+import {
+  clamp,
+  labelizeFrequency,
+  areGainsEqual
+} from "./_lib/audio-effects"
+
 export interface AudioEffect {
   id: string
   name: string
@@ -22,67 +37,6 @@ export interface AudioEffect {
 }
 
 export const audioEffectsModalAtom = atom(false)
-
-const EQ_BANDS = [
-  { label: "60Hz", sub: "Deep bass", freq: 60 },
-  { label: "230Hz", sub: "Bass / Medium", freq: 230 },
-  { label: "910Hz", sub: "Voices / Medium", freq: 910 },
-  { label: "3.6kHz", sub: "High pitch", freq: 3600 },
-  { label: "14kHz", sub: "Brilliance", freq: 14000 },
-]
-
-export const AUDIO_EFFECTS_REGISTRY: Record<string, AudioEffect> = {
-  none: {
-    id: "none",
-    name: "Normal",
-    description: "No audio effect applied",
-    gains: [0, 0, 0, 0, 0],
-    apply: (context, source) => source,
-  },
-  bassBoost: {
-    id: "bassBoost",
-    name: "Bass Boost",
-    description: "Bass booster",
-    gains: [6, 4, 0, 0, 0],
-    apply: (context, source) => {
-      const filter = context.createBiquadFilter()
-      filter.type = "lowshelf"
-      filter.frequency.value = 200
-      filter.gain.value = 6
-      source.connect(filter)
-      return filter
-    },
-  },
-  nightMode: {
-    id: "nightMode",
-    name: "Night Mode",
-    description: "Compress the dynamics (clear voices, reduced explosions)",
-    gains: [-4, -2, 4, 1, -3],
-    apply: (context, source) => {
-      const compressor = context.createDynamicsCompressor()
-      compressor.threshold.value = -30
-      compressor.knee.value = 12
-      compressor.ratio.value = 8
-      compressor.attack.value = 0.003
-      compressor.release.value = 0.25
-      source.connect(compressor)
-      return compressor
-    },
-  },
-  custom: {
-    id: "custom",
-    name: "Custom",
-    description: "Personnalized",
-    gains: [0, 0, 0, 0, 0],
-    apply: (context, source) => source,
-  },
-}
-
-// Check if two configurations are the same
-function areGainsEqual(a: number[], b: number[]) {
-  if (!a || !b || a.length !== b.length) return false
-  return a.every((val, index) => val === b[index])
-}
 
 // Spectrum + Equalizer
 export function AudioSpectrumEqualizer() {
@@ -96,7 +50,6 @@ export function AudioSpectrumEqualizer() {
   const dispatch = useSetAtom(vc_dispatchAction)
 
   // Equalizer's variables
-  // const [gains, setGains] = useState<number[]>([0, 0, 0, 0, 0])
   const [gains, setGains] = useAtom(vc_eqGains)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -122,14 +75,14 @@ export function AudioSpectrumEqualizer() {
 
   // Handling the reset of the equalizer
   const handleReset = () => {
-    const nextGains = [0, 0, 0, 0, 0]
+    const nextGains = defaultGains
     setGains(nextGains)
     updatePresetFromGains(nextGains)
   }
 
   // Handling the equalizer's modifications
   const handleGainChange = (index: number, value: number) => {
-    const currentGains = gains || [0, 0, 0, 0, 0]
+    const currentGains = gains || defaultGains
     const nextGains = [...currentGains]
     nextGains[index] = value
 
@@ -137,7 +90,28 @@ export function AudioSpectrumEqualizer() {
     updatePresetFromGains(nextGains)
   }
 
-  const currentAnimatedGains = useRef<number[]>([0, 0, 0, 0, 0])
+  // When we want to change the sliders with the mouse wheel
+  const handleWheelChange = (e: React.WheelEvent, index: number) => {
+    const currentGains = gains || defaultGains
+    const currentVal = currentGains[index] ?? 0
+
+    // Scroll direction
+    const step = e.shiftKey ? 0.1 : 0.5
+    const direction = e.deltaY < 0 ? 1 : -1
+
+    // New value of the gain
+    const newGain = currentVal + direction * step
+
+    // Clamp to prevent having borderless sliders
+    const clampedGain = clamp(newGain)
+
+    // Because I have a 0.1 precision
+    const roundedGain = Math.round(clampedGain * 10) / 10
+
+    handleGainChange(index, roundedGain)
+  }
+
+  const currentAnimatedGains = useRef<number[]>(defaultGains)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -148,7 +122,12 @@ export function AudioSpectrumEqualizer() {
     let animationFrameId: number
 
     const render = () => {
-      const activeGains = gainsRef.current || [0, 0, 0, 0, 0]
+      const activeGains = gainsRef.current || defaultGains
+
+      // S'assurer que le tableau d'animation suit la taille de EQ_BANDS
+      if (currentAnimatedGains.current.length !== EQ_BANDS.length) {
+        currentAnimatedGains.current = newBand(EQ_BANDS.length)
+      }
 
       // Linear Interpolation
       currentAnimatedGains.current = currentAnimatedGains.current.map((current, idx) => {
@@ -193,9 +172,13 @@ export function AudioSpectrumEqualizer() {
           barHeight = (dataArray[i] / 255) * (height * 0.85)
         } else {
           // If no sound is played, then display a stylish sinewave because I'm cool
-          barHeight =
-            Math.sin(Date.now() * 0.0025 + i * 0.3) * (height * 0.2) +
-            height * 0.25
+          if (paused) {
+            barHeight =
+              Math.sin(Date.now() * 0.0025 + i * 0.3) * (height * 0.2) +
+              height * 0.25
+          } else {
+            barHeight = 0
+          }
         }
 
         const gradient = ctx.createLinearGradient(0, height, 0, 0)
@@ -236,13 +219,13 @@ export function AudioSpectrumEqualizer() {
     render()
 
     return () => cancelAnimationFrame(animationFrameId)
-  }, [analyserNode, gains])
+  }, [analyserNode, gains, paused])
 
   return (
     <div className="space-y-3">
       {/* Play/Pause button and Reset button */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-neutral-400 font-medium">
+      <div className="flex items-center justify-between focus:outline-none focus-visible:outline-none">
+        <div className="flex items-center gap-2 text-xs text-neutral-400 font-medium focus:outline-none focus-visible:outline-none">
           <LuActivity className="text-indigo-400 animate-pulse text-sm" />
           Parametric Equalizer & Spectrum
         </div>
@@ -250,18 +233,20 @@ export function AudioSpectrumEqualizer() {
         {/* Play / Pause button */}
         <button
           type="button"
-          onClick={() => dispatch({ type: "togglePlay" })}
-          className="flex items-center gap-1.5 text-xs font-medium text-neutral-200 hover:text-white transition-colors bg-indigo-600/80 hover:bg-indigo-600 px-2.5 py-1 rounded-md cursor-pointer"
+          onClick={() => {
+            dispatch({ type: "togglePlay" })
+          }}
+          className="flex items-center gap-1.5 text-xs font-medium text-neutral-200 hover:text-white transition-colors bg-indigo-600/80 hover:bg-indigo-600 px-2.5 py-1 rounded-md cursor-pointer focus:outline-none focus-visible:outline-none"
           title={paused ? "Play" : "Pause"}
         >
           {paused ? (
             <>
-              <LuPlay className="text-xs fill-current" />
+              <LuPlay className="text-xs fill-current focus:outline-none focus-visible:outline-none" />
               Play
             </>
           ) : (
             <>
-              <LuPause className="text-xs fill-current" />
+              <LuPause className="text-xs fill-current focus:outline-none focus-visible:outline-none" />
               Pause
             </>
           )}
@@ -271,29 +256,30 @@ export function AudioSpectrumEqualizer() {
         <button
           type="button"
           onClick={handleReset}
-          className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors bg-neutral-800/60 hover:bg-neutral-800 px-2.5 py-1 rounded-md border border-neutral-700/50 cursor-pointer"
+          className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white transition-colors bg-neutral-800/60 hover:bg-neutral-800 px-2.5 py-1 rounded-md border border-neutral-700/50 cursor-pointer focus:outline-none focus-visible:outline-none"
         >
-          <LuRotateCcw className="text-xs" />
+          <LuRotateCcw className="text-xs focus:outline-none focus-visible:outline-none" />
           Reset (0 dB)
         </button>
       </div>
 
       {/* Unified canva */}
-      <div className="relative w-full h-60 bg-neutral-950/80 rounded-2xl border border-neutral-800/80 overflow-hidden p-6 flex items-center">
+      <div className="relative w-full h-60 bg-neutral-950/80 rounded-2xl border border-neutral-800/80 overflow-hidden p-6 flex items-center focus:outline-none focus-visible:outline-none">
         <canvas
           ref={canvasRef}
           width={700}
           height={240}
-          className="absolute inset-0 w-full h-full pointer-events-none z-0"
+          className="absolute inset-0 w-full h-full pointer-events-none z-0 focus:outline-none focus-visible:outline-none"
         />
 
-        <div className="relative z-10 w-full h-full flex justify-between items-center gap-4">
+        <div className="relative z-10 w-full h-full flex justify-between items-center gap-4 focus:outline-none focus-visible:outline-none">
           {EQ_BANDS.map((band, idx) => {
             const currentGain = gains ? gains[idx] : 0
             return (
               <div
-                key={band.label}
-                className="flex-1 h-full flex flex-col items-center justify-between group"
+                key={idx}
+                className="flex-1 h-full flex flex-col items-center justify-between group focus:outline-none focus-visible:outline-none"
+                onWheel={(e) => handleWheelChange(e, idx)}
               >
                 <span
                   className={`text-xs font-mono font-semibold transition-colors ${
@@ -302,30 +288,30 @@ export function AudioSpectrumEqualizer() {
                       : currentGain < 0
                       ? "text-rose-400"
                       : "text-neutral-500"
-                  }`}
+                  } focus:outline-none focus-visible:outline-none`}
                 >
                   {currentGain > 0 ? `+${currentGain}` : currentGain} dB
                 </span>
 
-                <div className="h-32 flex items-center justify-center py-2">
+                <div className="h-32 flex items-center justify-center py-2 focus:outline-none focus-visible:outline-none">
                   <input
                     type="range"
-                    min="-12"
-                    max="12"
-                    step="1"
+                    min={C_MIN_GAIN}
+                    max={C_MAX_GAIN}
+                    step="0.1"
                     value={currentGain}
                     onChange={(e) =>
                       handleGainChange(idx, parseFloat(e.target.value))
                     }
-                    className="h-28 w-1.5 accent-indigo-500 bg-neutral-800 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
+                    className="h-28 w-1.5 accent-indigo-500 bg-neutral-800 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl] focus:outline-none focus-visible:outline-none"
                   />
                 </div>
 
                 <div className="text-center space-y-0.5">
-                  <p className="text-xs font-bold text-white group-hover:text-indigo-300 transition-colors">
-                    {band.label}
+                  <p className="text-xs font-bold text-white group-hover:text-indigo-300 transition-colors focus:outline-none focus-visible:outline-none">
+                    {labelizeFrequency(band.freq_hz)}
                   </p>
-                  <p className="text-[10px] text-neutral-500 hidden md:block">
+                  <p className="text-[10px] text-neutral-500 hidden md:block focus:outline-none focus-visible:outline-none">
                     {band.sub}
                   </p>
                 </div>

@@ -146,7 +146,8 @@ import { VideoCoreScreenshotDirPrompt } from "./video-core-screenshot-prompt"
 
 import { vc_selectedAudioEffect } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_analyserNode } from "@/app/(main)/_features/video-core/video-core-atoms"
-import { AUDIO_EFFECTS_REGISTRY, VideoCoreAudioEffectsModal } from "@/app/(main)/_features/video-core/video-core-audio-effects"
+import { VideoCoreAudioEffectsModal } from "@/app/(main)/_features/video-core/video-core-audio-effects"
+import { EQ_BANDS } from "./_lib/audio-effects"
 
 const log = logger("VIDEO CORE")
 
@@ -740,9 +741,9 @@ export function VideoCore(props: VideoCoreProps) {
         if (!v || !state.active) return
 
         const handleAudioInit = () => {
-            // Prevent double creation of AudioContext
-            if (!audioCtxRef.current) {
-                try {
+            try {
+                // Prevent double creation of AudioContext
+                if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
                     const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext
                     const audioCtx = new AudioCtxClass()
                     audioCtxRef.current = audioCtx
@@ -753,8 +754,17 @@ export function VideoCore(props: VideoCoreProps) {
                     analyser.fftSize = 64 // 32 frequency bands for the spectrum
 
                     // 5-BAND Equalizer
-                    const freqs = [60, 230, 910, 3600, 14000]
-                    const types: BiquadFilterType[] = ["lowshelf", "peaking", "peaking", "peaking", "highshelf"]
+                    const freqs = EQ_BANDS.map((components) => {return components.freq_hz})
+                    const types: BiquadFilterType[] = []
+                    freqs.forEach((freq_hz) => {
+                        if (freq_hz <= 900) {
+                            types.push("lowshelf")
+                        } else if (freq_hz >= 1500) {
+                            types.push("highshelf")
+                        } else {
+                            types.push("peaking")
+                        }
+                    })
 
                     const filters = freqs.map((freq, i) => {
                         const filter = audioCtx.createBiquadFilter()
@@ -778,18 +788,22 @@ export function VideoCore(props: VideoCoreProps) {
 
                     // Publish analyser in Jotai atom
                     setAnalyserNode(analyser)
-                } catch (err) {
-                    log.error("Failed to initialize Web Audio AnalyserNode", err)
                 }
-            }
+                    
+                // Handle the change of episodes
+                if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+                    audioCtxRef.current.resume()
+                }
 
-            if (audioCtxRef.current?.state === "suspended") {
-                audioCtxRef.current.resume()
+            } catch (err) {
+                log.error("Failed to initialize Web Audio AnalyserNode", err)
             }
         }
 
         // Listens to the future clicks on Play
         v.addEventListener("play", handleAudioInit)
+        v.addEventListener("loadedmetadata", handleAudioInit)
+        v.addEventListener("loadstart", handleAudioInit)
 
         // Correction AUTOPLAY
         if (!v.paused) {
@@ -798,12 +812,20 @@ export function VideoCore(props: VideoCoreProps) {
 
         return () => {
             v.removeEventListener("play", handleAudioInit)
+            v.removeEventListener("loadedmetadata", handleAudioInit)
+            v.removeEventListener("loadstart", handleAudioInit)
+
+            if (audioCtxRef.current) {
+                audioCtxRef.current.close().catch((err) => { console.log(err) })
+                audioCtxRef.current = null
+            }
+            setAnalyserNode(null)
         }
-    }, [videoRef.current, state.active, setAnalyserNode])
+    }, [videoRef.current, state.active, videoRef.current?.src])
 
     // Real-time configuration of the equalizer
     React.useEffect(() => {
-        if (eqFiltersRef.current.length === 5) {
+        if (eqFiltersRef.current.length === EQ_BANDS.length) {
             eqGains.forEach((gain, index) => {
                 if (eqFiltersRef.current[index]) {
                     eqFiltersRef.current[index].gain.value = gain

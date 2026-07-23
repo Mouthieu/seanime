@@ -263,7 +263,9 @@ function MpvCorePlayerContent(props: MpvCorePlayerContentProps) {
     const setFrameDrops = useSetAtom(mc_frameDrops)
     const setCacheState = useSetAtom(mc_cacheState)
     const preferencesOpen = useAtomValue(mpvCorePreferencesModalAtom)
+    const audioEffectsOpen = useAtomValue(mpvCorePreferencesModalAtom)
     const setPreferencesOpen = useSetAtom(mpvCorePreferencesModalAtom)
+    const setAudioEffectsOpen = useSetAtom(mpvCorePreferencesModalAtom)
 
     // Shared preferences
     const [preferences, setPreferences] = useAtom(mediaCorePreferencesAtom)
@@ -1211,6 +1213,7 @@ function MpvCorePlayerContent(props: MpvCorePlayerContentProps) {
             if (
                 event.defaultPrevented ||
                 preferencesOpen ||
+                audioEffectsOpen ||
                 isEditableKeyboardTarget(event.target) ||
                 isEditableKeyboardTarget(document.activeElement) ||
                 event.ctrlKey ||
@@ -1932,6 +1935,7 @@ function MpvCorePlayerContent(props: MpvCorePlayerContentProps) {
                                                 anime4kError={anime4kError}
                                                 onRefreshAnime4K={() => refreshAnime4KDirectory(shaderSettings.directory || undefined)}
                                                 onOpenPreferences={() => setPreferencesOpen(true)}
+                                                onOpenAudioEffects={() => setAudioEffectsOpen(true)}
                                             />
 
                                             {!!state.playbackInfo?.videoSources?.length && (
