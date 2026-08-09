@@ -1,3 +1,4 @@
+import { AudioEffect } from "../video-core-audio-effects"
 // File that will compute some filters and also provide settings for the audio effects
 // settings
 export const C_MAX_GAIN: number = 12
@@ -12,15 +13,21 @@ const HIGH_MIDS: number = 4000
 const TREBLE   : number = 6000
 const BRILLANCE: number = 20000
 
+// EQ_BAND type
+type EQBand = {
+  freq_hz: number
+  sub: string
+}
+
 // Returns an array of gains filled with 0s
-export function newBand(N_BANDS: number): Array {
+export function newBand(N_BANDS: number): Array<number> {
   return new Array(N_BANDS).fill(0)
 }
 
 // Calculate manually the gains of a bassboost
-export function getBassBoostGains(EQ_BANDS: Array): number[] {
+export function getBassBoostGains(EQ_BANDS: EQBand[]): number[] {
   let gains: number[] = []
-  EQ_BANDS.forEach((component) => {
+  EQ_BANDS.forEach((component: EQBand) => {
     let freq: number = component.freq_hz
     let value: number = 0
 
@@ -41,9 +48,9 @@ export function getBassBoostGains(EQ_BANDS: Array): number[] {
   return gains
 }
 
-export function getNightModeGains(EQ_BANDS: Array): number[] {
+export function getNightModeGains(EQ_BANDS: EQBand[]): number[] {
   let gains: number[] = []
-  EQ_BANDS.forEach((component) => {
+  EQ_BANDS.forEach((component: EQBand) => {
     let freq = component.freq_hz
     let value = 0
 
@@ -85,12 +92,13 @@ export function clamp(value: number): number {
 }
 
 // Variables export
-export const EQ_BANDS = [
+export const EQ_BANDS: EQBand[] = [
   { freq_hz: 60, sub: "Deep bass" },
   { freq_hz: 230, sub: "Bass / Medium" },
   { freq_hz: 910, sub: "Voices / Medium" },
   { freq_hz: 3600, sub: "High pitch" },
   { freq_hz: 5000, sub: "Treble"},
+  { freq_hz: 7000, sub: "dummy"},
   { freq_hz: 14000, sub: "Brilliance" },
 ]
 

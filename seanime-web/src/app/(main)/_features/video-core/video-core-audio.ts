@@ -2,8 +2,6 @@ import { HlsAudioTrack } from "@/app/(main)/_features/video-core/video-core-hls"
 import { VideoCore_VideoPlaybackInfo, VideoCoreSettings } from "@/app/(main)/_features/video-core/video-core.atoms"
 import { logger } from "@/lib/helpers/debug"
 import { isTrackLanguageMatch } from "@/lib/helpers/language"
-import { AUDIO_EFFECTS_REGISTRY } from "./video-core-audio-effects"
-
     
 
 const audioLog = logger("AUDIO")
@@ -27,9 +25,6 @@ export class VideoCoreAudioManager extends EventTarget {
     private readonly hlsSetAudioTrack: ((trackId: number) => void) | null = null
     private readonly hlsAudioTracks: HlsAudioTrack[] = []
     private hlsCurrentAudioTrack: number = -1
-    private audioCtx: AudioContext | null = null
-    private sourceNode: MediaElementAudioSourceNode | null = null;
-    private currentEffectNode: AudioNode | null = null
 
     constructor({
         videoElement,
@@ -307,29 +302,5 @@ export class VideoCoreAudioManager extends EventTarget {
 
     isHlsStream() {
         return this.hlsSetAudioTrack !== null && this.hlsAudioTracks.length > 0
-    }
-
-    // public initAudioEffects(videoElement: HTMLVideoElement) {
-    //     if (this.audioCtx) return;
-
-    //     this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    //     this.sourceNode = this.audioCtx.createMediaElementSource(videoElement),
-    //     this.sourceNode.connect(this.audioCtx.destination);
-    // }
-
-    setupWebAudio(videoElement: HTMLMediaElement, setAnalyser: (node: AnalyserNode) => void) {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-        const source = audioCtx.createMediaElementSource(videoElement)
-        
-        // Création du nœud d'analyse
-        const analyser = audioCtx.createAnalyser()
-        analyser.fftSize = 64 // 32 bandes de fréquences
-        
-        // Chaînage : Source -> Analyser -> Destinations (Haut-parleurs)
-        source.connect(analyser)
-        analyser.connect(audioCtx.destination)
-
-        // On stocke l'analyser dans l'atom Jotai
-        setAnalyser(analyser)
     }
 }

@@ -42,7 +42,6 @@ import { vc_containerElement } from "@/app/(main)/_features/video-core/video-cor
 import { vc_previousPausedState } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_lastKnownProgress } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { vc_skipChapter } from "@/app/(main)/_features/video-core/video-core-atoms"
-import { vc_selectedAudioEffect } from "@/app/(main)/_features/video-core/video-core-atoms"
 import { VideoCoreAudioManager } from "@/app/(main)/_features/video-core/video-core-audio"
 import { VideoCoreAudioMenu } from "@/app/(main)/_features/video-core/video-core-audio-menu"
 import { CastPlaybackControls, useCastSubtitleRelay, vc_isCasting, VideoCoreCastButton } from "@/app/(main)/_features/video-core/video-core-cast"

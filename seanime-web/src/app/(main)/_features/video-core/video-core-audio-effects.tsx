@@ -124,7 +124,7 @@ export function AudioSpectrumEqualizer() {
     const render = () => {
       const activeGains = gainsRef.current || defaultGains
 
-      // S'assurer que le tableau d'animation suit la taille de EQ_BANDS
+      // Make sure the animation array is following EQ_BANDS's size
       if (currentAnimatedGains.current.length !== EQ_BANDS.length) {
         currentAnimatedGains.current = newBand(EQ_BANDS.length)
       }
